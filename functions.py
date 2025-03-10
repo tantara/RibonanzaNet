@@ -29,6 +29,7 @@ class Config:
     # Data scaling
     use_data_percentage: int
     use_dirty_data: bool  # turn off for data scaling and data dropout experiments
+    seq_length: int
 
     # Other configurations
     fold: int
@@ -45,15 +46,6 @@ class Config:
         the original dictionary of entries in the 'entries' attribute.
         """
         self.__dict__.update(entries)
-        self.entries = entries
-
-    def print(self):
-        """
-        Prints the configuration entries.
-
-        Outputs the configuration settings stored in the instance's entries attribute to the console.
-        """
-        print(self.entries)
 
 
 def drop_pk5090_duplicates(df):

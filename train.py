@@ -34,14 +34,27 @@ def train(args):
     # init accelerator & wandb
     accelerator = Accelerator(mixed_precision="fp16")
     if accelerator.is_local_main_process:
-        wandb.init(
+        run = wandb.init(
             project="ribonanza",
             config=config,
         )
+        wandb_run_id = run.id
+    else:
+        wandb_run_id = "local"
 
     # init logger
+    base_dir = f"experiments/{wandb_run_id}"
+    log_dir = f"{base_dir}/logs"
+    model_dir = f"{base_dir}/models"
+    oofs_dir = f"{base_dir}/oofs"
+
+    os.system(f"mkdir -p {log_dir}")
+    os.system(f"mkdir -p {model_dir}")
+    os.system(f"mkdir -p {oofs_dir}")
+
     logger = CSVLogger(
-        ["epoch", "train_loss", "val_loss"], f"logs/fold{config.fold}.csv"
+        ["epoch", "train_loss", "val_loss"],
+        f"{log_dir}/fold{config.fold}.csv",
     )
 
     # init seed
@@ -52,11 +65,6 @@ def train(args):
     # os.environ["POLARS_MAX_THREADS"] = "1"
     os.environ["CUDA_VISIBLE_DEVICES"] = str(config.gpu_id)
     os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
-
-    # create directories
-    os.system("mkdir logs")
-    os.system("mkdir models")
-    os.system("mkdir oofs")
 
     # load data
     data = pl.read_csv(f"{config.input_dir}/train_data.csv")
@@ -70,9 +78,9 @@ def train(args):
     print("after dropping duplicates data shape is:", data.shape)
     # data=data.sort(["signal_to_noise"],descending=True).unique(subset=["sequence_id", "experiment_type"]).sort(["sequence_id", "experiment_type"])
 
-    n_sequences_total = len(data) // 2
+    # n_sequences_total = len(data) // 2
     # get necessary data as lists and numpy arrays
-    seq_length = 206
+    seq_length = config.seq_length
 
     # filter out a sequence if min signal_to_noise is smaller than 1
     signal_to_noise = (
@@ -95,12 +103,8 @@ def train(args):
     dirty_data = dirty_data.filter(dirty_signal_to_noise > 1)
     print("after filtering dirty_data shape is:", dirty_data.shape)
 
-    label_names = [
-        "reactivity_{:04d}".format(number + 1) for number in range(seq_length)
-    ]
-    error_label_names = [
-        "reactivity_error_{:04d}".format(number + 1) for number in range(seq_length)
-    ]
+    label_names = [f"reactivity_{i:04d}" for i in range(seq_length)]
+    error_label_names = [f"reactivity_error_{i:04d}" for i in range(seq_length)]
 
     sequences = data.unique(subset=["sequence_id"], maintain_order=True)[
         "sequence"
@@ -112,14 +116,14 @@ def train(args):
         data[label_names]
         .to_numpy()
         .astype("float32")
-        .reshape(-1, 2, 206)
+        .reshape(-1, 2, seq_length)
         .transpose(0, 2, 1)
     )
     errors = (
         data[error_label_names]
         .to_numpy()
         .astype("float32")
-        .reshape(-1, 2, 206)
+        .reshape(-1, 2, seq_length)
         .transpose(0, 2, 1)
     )
     signal_to_noise = (
@@ -171,7 +175,7 @@ def train(args):
                 dirty_data[label_names]
                 .to_numpy()
                 .astype("float32")
-                .reshape(-1, 2, 206)
+                .reshape(-1, 2, seq_length)
                 .transpose(0, 2, 1),
             ]
         )
@@ -181,7 +185,7 @@ def train(args):
                 dirty_data[error_label_names]
                 .to_numpy()
                 .astype("float32")
-                .reshape(-1, 2, 206)
+                .reshape(-1, 2, seq_length)
                 .transpose(0, 2, 1),
             ]
         )
@@ -221,7 +225,7 @@ def train(args):
     val_datasets_names = data[np.concatenate([val_indices * 2])][
         "dataset_name"
     ].to_list()
-    with open("oofs/val_dataset_names.p", "wb+") as f:
+    with open(f"{oofs_dir}/val_dataset_names.p", "wb+") as f:
         pickle.dump(val_datasets_names, f)
 
     del data
@@ -231,7 +235,6 @@ def train(args):
     print(f"val shape: {val_indices.shape}")
 
     val_dataset_name = [dataset_name[i] for i in val_indices]
-
     # pl_train=pl.read_parquet()
 
     train_dataset = RNADataset(
@@ -245,8 +248,7 @@ def train(args):
         num_workers=min(config.batch_size, 16),
     )
 
-    sample = train_dataset[0]
-
+    # sample = train_dataset[0]
     val_dataset = RNADataset(val_indices, data_dict, train=False, k=config.k)
     val_loader = DataLoader(
         val_dataset,
@@ -349,11 +351,11 @@ def train(args):
         if epoch == cos_epoch:
             torch.save(
                 accelerator.unwrap_model(model).state_dict(),
-                f"models/model{config.fold}_pl_only.pt",
+                f"{model_dir}/model{config.fold}_pl_only.pt",
             )
         torch.save(
             accelerator.unwrap_model(optimizer).state_dict(),
-            f"models/optimizer{config.fold}.pt",
+            f"{model_dir}/optimizer{config.fold}.pt",
         )
 
         # validation loop
@@ -439,7 +441,7 @@ def train(args):
                 best_val_loss = val_loss
                 torch.save(
                     accelerator.unwrap_model(model).state_dict(),
-                    f"models/model{config.fold}.pt",
+                    f"{model_dir}/model{config.fold}.pt",
                 )
                 # accelerator.save_model(model, f"models/model{config.fold}.pt")
                 data_dict = {
@@ -449,7 +451,7 @@ def train(args):
                 }
 
                 # Save to pickle file
-                with open(f"oofs/{config.fold}.pkl", "wb+") as file:
+                with open(f"{oofs_dir}/{config.fold}.pkl", "wb+") as file:
                     pickle.dump(data_dict, file)
 
         if accelerator.is_local_main_process:
@@ -464,13 +466,13 @@ def train(args):
     if accelerator.is_local_main_process:
         torch.save(
             accelerator.unwrap_model(model).state_dict(),
-            f"models/model{config.fold}_lastepoch.pt",
+            f"{model_dir}/model{config.fold}_lastepoch.pt",
         )
 
         end_time = time.time()
         elapsed_time = end_time - start_time
 
-        with open("run_stats.json", "w") as file:
+        with open(f"{log_dir}/run_stats.json", "w") as file:
             json.dump({"total_execution_time": elapsed_time}, file, indent=4)
 
     if accelerator.is_local_main_process:
