@@ -7,6 +7,21 @@ from torch.utils.data import Dataset
 
 
 def load_bpp(filename, seq_length=177):
+    """
+    Initializes a square base pair probability matrix.
+    
+    This function creates and returns a two-dimensional NumPy array of zeros with shape 
+    (seq_length, seq_length). The 'filename' parameter is intended for a file containing 
+    base pair probability data, but the data processing is currently disabled, so the 
+    matrix serves as a placeholder.
+    
+    Args:
+        filename: Path to the file with base pair probabilities (currently unused).
+        seq_length: The size of one side of the square matrix (default is 177).
+    
+    Returns:
+        A NumPy array of shape (seq_length, seq_length) filled with zeros.
+    """
     matrix = [[0.0 for x in range(seq_length)] for y in range(seq_length)]
     #   #matrix=0
     # data processing
@@ -27,6 +42,18 @@ def load_bpp(filename, seq_length=177):
 class RNADataset(Dataset):
     def __init__(self, indices, data_dict, k=5, train=True, flip=False):
 
+        """
+        Initialize the RNA dataset with indices and associated sequence data.
+        
+        Args:
+            indices: A collection of identifiers for RNA sequences.
+            data_dict: A dictionary mapping each identifier to its RNA sequence data and metadata.
+            k: An integer (default 5) that influences sequence encoding or masking.
+            train: A boolean flag indicating whether the dataset is used for training, which may enable data augmentations.
+            flip: A boolean flag that, if True, allows random sequence flipping during training.
+        
+        Also sets up a nucleotide token mapping that converts 'A', 'C', 'G', and 'U' to integers and assigns a special token 'P'.
+        """
         self.indices = indices
         self.data_dict = data_dict
         self.k = k
@@ -36,16 +63,61 @@ class RNADataset(Dataset):
         self.flip = flip
 
     def generate_src_mask(self, L1, L2, k):
+        """
+        Generates a source mask for RNA sequence processing.
+        
+        This function creates a (k, L2) NumPy array of type int8 initialized with ones.
+        For each row i, elements from the index (L1 + i + 1 - k) to the end are set to zero,
+        adjusting the mask based on the provided sequence length offset and number of rows.
+        
+        Args:
+            L1 (int): Baseline index used to compute the start of the zeroed region.
+            L2 (int): Total number of columns in the mask.
+            k (int): Number of rows in the mask and a factor for computing the offset.
+        
+        Returns:
+            np.ndarray: A (k, L2) mask with elements set to 1 or 0.
+        """
         mask = np.ones((k, L2), dtype="int8")
         for i in range(k):
             mask[i, L1 + i + 1 - k :] = 0
         return mask
 
     def __len__(self):
+        """
+        Return the number of items in the dataset.
+        
+        Returns:
+            int: The total count of indices in the dataset.
+        """
         return len(self.indices)
 
     def __getitem__(self, idx):
 
+        """
+        Retrieves and processes an RNA sequence sample with its associated metadata.
+        
+        This method selects a sample using an internal index mapping, converts the RNA
+        sequence from nucleotide characters to numerical tokens based on a predefined
+        mapping, and extracts the corresponding labels and error values, trimming them
+        to the sequence length. NaN values in the labels and errors are replaced with zeros,
+        and a loss mask is generated to indicate valid label positions. Label values are
+        clipped between 0 and 1 before all data are converted to torch tensors. In training
+        mode, if sequence flipping is enabled, the sequence, labels, and loss mask are randomly
+        reversed to augment the data.
+        
+        Args:
+            idx (int): Index of the sample to retrieve.
+        
+        Returns:
+            dict: A dictionary containing:
+                - "sequence" (torch.LongTensor): Tokenized RNA sequence.
+                - "labels" (torch.FloatTensor): Clipped label values.
+                - "mask" (torch.Tensor): Mask indicating valid sequence positions.
+                - "loss_mask" (torch.BoolTensor): Boolean mask identifying valid labels.
+                - "errors" (torch.FloatTensor): Error values with NaNs replaced by zeros.
+                - "SN" (torch.FloatTensor): Signal-to-noise ratio.
+        """
         idx = self.indices[idx]
 
         sequence = [self.tokens[nt] for nt in self.data_dict["sequences"][idx]]
@@ -106,6 +178,19 @@ class TestRNAdataset(RNADataset):
         # print()
         # idx=int(idx)
         # print(self.tokens)
+        """
+        Retrieves a tokenized RNA sequence and its mask.
+        
+        This method converts the nucleotide characters in the sequence at the given index into token indices using a predefined mapping. It then constructs a mask tensor of ones that matches the sequence length.
+        
+        Args:
+            idx: Index of the sequence to retrieve.
+        
+        Returns:
+            dict: A dictionary containing:
+                "sequence" - A PyTorch tensor (dtype long) with the tokenized RNA sequence.
+                "mask" - A tensor of ones with the same length as the sequence.
+        """
         sequence = [self.tokens[nt] for nt in self.data_dict["sequences"][idx]]
         sequence = np.array(sequence)
 
@@ -128,6 +213,15 @@ class TestRNAdataset(RNADataset):
 class Custom_Collate_Obj:
 
     def __call__(self, data):
+        """
+        Collate and pad RNA sequence samples for batching.
+        
+        This function processes a list of sample dictionaries, each containing keys such as "sequence",
+        "labels", "mask", "loss_mask", "errors", and "SN". It computes the maximum sequence length in the batch
+        and pads each field accordingly to ensure uniform tensor shapes. If the samples include base pair
+        probability data under the key "bpp", that data is also padded and incorporated into the result.
+        The output is a dictionary containing the stacked tensors and a tensor of the original sequence lengths.
+        """
         length = []
         for i in range(len(data)):
             length.append(len(data[i]["sequence"]))
@@ -192,6 +286,15 @@ class Custom_Collate_Obj:
 class Custom_Collate_Obj_test(Custom_Collate_Obj):
 
     def __call__(self, data):
+        """
+        Collates and pads RNA sample data for batch processing.
+        
+        This method processes a list of dictionaries where each dictionary contains a "sequence" tensor and a
+        "mask" tensor, with an optional "bpp" tensor for base pair probabilities. It computes the maximum sequence
+        length in the batch and pads each "sequence" with the constant value 4 and each "mask" with 0 to match this 
+        length. If present, the "bpp" matrices are padded on both dimensions with zeros. Finally, the padded tensors are
+        stacked and returned in a dictionary containing the batched "sequence", "masks", "length", and, if applicable, "bpps".
+        """
         length = []
         for i in range(len(data)):
             length.append(len(data[i]["sequence"]))
