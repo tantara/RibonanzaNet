@@ -82,7 +82,7 @@ def train(args):
     dirty_data = data.filter((SN <= 1))
     data = data.filter(SN > 1)
     print("after filtering data shape is:", data.shape)
-    print("direty data shape is:", dirty_data.shape)
+    print("dirty data shape is:", dirty_data.shape)
 
     # get sequences where one of 2A3/DMS has SN>1
     dirty_SN = dirty_data["signal_to_noise"].to_numpy().astype("float32").reshape(-1, 2)
