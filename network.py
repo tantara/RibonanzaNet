@@ -384,16 +384,17 @@ class ConvTransformerEncoderLayer(nn.Module):
         self, src, pairwise_features, src_mask=None, return_attention_weights=False
     ):
         """
-        Performs a forward pass that updates sequence and pairwise features via convolution, self-attention, and triangular operations.
-
+        Updates sequence and pairwise features using convolution, self-attention, and triangle operations.
+        
         Args:
-            src: Input tensor of sequence features, modulated by src_mask.
-            pairwise_features: Tensor of pairwise features that is updated through outer product projections and triangle modules.
-            src_mask: Optional mask tensor applied to src to suppress invalid entries.
-            return_attention_weights: If True, includes self attention weights in the returned tuple.
-
+            src: Tensor of sequence features, modulated by src_mask.
+            pairwise_features: Tensor of pairwise features updated via outer products and triangle modules.
+            src_mask: Optional tensor mask applied to src to suppress invalid entries.
+            return_attention_weights: If True, includes self-attention weights in the returned tuple.
+        
         Returns:
-            A tuple containing the updated sequence features and pairwise features. If return_aw is True, the tuple also includes the self attention weights.
+            A tuple containing the updated sequence and pairwise features. If return_attention_weights is True,
+            the tuple also includes the self-attention weights.
         """
         src = src * src_mask.float().unsqueeze(-1)
 
@@ -538,10 +539,11 @@ class relpos(nn.Module):
     def __init__(self, dim=64):
         """
         Initialize the relative positional encoding module.
-
-        This constructor sets up a linear transformation that projects a fixed input size of 17
-        to the specified output dimensionality.
-
+        
+        Sets up a linear projection that maps a fixed 17-dimensional representation of relative
+        positions (with bins ranging from -8 to 8) into an output feature space of the specified dimension.
+        Also predefines the bin values and a boundary constant used in relative positional computations.
+        
         Args:
             dim (int): The output feature dimension for the linear projection (default: 64).
         """
@@ -766,19 +768,22 @@ class RibonanzaNet(nn.Module):
     def forward(self, src, src_mask=None, return_attention_weights=False):
         """
         Performs a forward pass through the model.
-
-        Encodes the input sequence, computes pairwise features using an outer product mean
-        and positional encoding, and passes the result through multiple transformer encoder
-        layers and a decoder. If requested, collects and returns attention weights from each
-        encoder layer.
-
+        
+        Encodes the input sequence, computes pairwise features by combining the outer
+        product mean with positional encodings, and processes the result through multiple
+        transformer encoder layers followed by a decoder. Optionally, attention weights
+        from each encoder layer are collected and returned.
+        
         Args:
             src: Input tensor of shape (batch_size, sequence_length).
-            src_mask: Optional mask tensor for the encoder layers.
-            return_attention_weights: If True, returns a tuple containing the output and a list of attention weights.
-
+            src_mask: Optional mask tensor applied to the encoder layers.
+            return_attention_weights: If True, returns a tuple containing the output and a
+                list of attention weights from each encoder layer.
+        
         Returns:
-            If return_aw is True, a tuple (output, attention_weights); otherwise, the output tensor.
+            A tensor output from the decoder if return_attention_weights is False; otherwise,
+            a tuple (output, attention_weights), where attention_weights is a list with the
+            attention weights from each transformer encoder layer.
         """
         B, L = src.shape
         src = self.encoder(src).reshape(B, L, -1)
