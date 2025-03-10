@@ -327,7 +327,7 @@ def train(args):
                 if step % 1000 == 0:
                     wandb.log(
                         {
-                            "train_loss": train_loss / (idx + 1),
+                            "train_loss": total_loss / (idx + 1),
                             "local_loss": local_loss,
                             "learning_rate": optimizer.param_groups[0]["lr"],
                         },
