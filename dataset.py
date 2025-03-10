@@ -286,12 +286,21 @@ class Custom_Collate_Obj_test(Custom_Collate_Obj):
     def __call__(self, data):
         """
         Collates and pads RNA sample data for batch processing.
-
-        This method processes a list of dictionaries where each dictionary contains a "sequence" tensor and a
-        "mask" tensor, with an optional "bpp" tensor for base pair probabilities. It computes the maximum sequence
-        length in the batch and pads each "sequence" with the constant value 4 and each "mask" with 0 to match this
-        length. If present, the "bpp" matrices are padded on both dimensions with zeros. Finally, the padded tensors are
-        stacked and returned in a dictionary containing the batched "sequence", "masks", "length", and, if applicable, "bpps".
+        
+        This function processes a list of sample dictionaries, each representing an RNA sample. Every dictionary must contain a "sequence" tensor and a "mask" tensor, and it may optionally include a "bpp" tensor for base pair probabilities. The function computes the maximum sequence length in the batch, pads each "sequence" with the constant value 4 and each "mask" with 0 to reach this length, and—if present—pads the "bpp" matrices along both dimensions with 0. Finally, it stacks the padded tensors and returns a dictionary containing the batched "sequence", "masks", "length", and, if applicable, "bpps".
+        
+        Args:
+            data: A list of dictionaries containing RNA sample data. Each dictionary must include:
+                "sequence": A tensor representing the RNA sequence.
+                "mask": A tensor indicating valid sequence positions.
+                Optionally, "bpp": A tensor representing base pair probabilities.
+        
+        Returns:
+            A dictionary with the following keys:
+                "sequence": A tensor of padded RNA sequences.
+                "masks": A tensor of padded masks.
+                "length": A tensor of original sequence lengths.
+                "bpps" (if available): A tensor of padded base pair probability matrices.
         """
         length = []
         for i in range(len(data)):
