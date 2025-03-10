@@ -11,6 +11,18 @@ from torch.nn.parameter import Parameter
 
 def init_weights(m):
     # print(m)
+    """
+    Initialize weights for linear layers.
+    
+    This function is intended to initialize the weights and biases of layers that
+    are instances of nn.Linear using Xavier uniform initialization for weights
+    and setting biases to 0.01. Currently, the initialization code is commented
+    out, so the function serves as a placeholder.
+     
+    Args:
+        m: A neural network module. If m is an instance of nn.Linear, it is a target
+           for weight initialization.
+    """
     if m is not None and isinstance(m, nn.Linear):
         pass
         # torch.nn.init.xavier_uniform_(m.weight)
@@ -24,27 +36,81 @@ def init_weights(m):
 # mish activation
 class Mish(nn.Module):
     def __init__(self):
+        """
+        Initializes the instance.
+        
+        Delegates initialization to the superclass constructor.
+        """
         super().__init__()
 
     def forward(self, x):
         # inlining this saves 1 second per epoch (V100 GPU) vs having a temp x and then returning x(!)
+        """
+        Computes the Mish activation function.
+        
+        This function applies the Mish activation element-wise, defined as:
+          x * tanh(softplus(x)).
+        
+        Args:
+            x (Tensor): The input tensor.
+        
+        Returns:
+            Tensor: The output tensor with the Mish activation applied.
+        """
         return x * (torch.tanh(F.softplus(x)))
 
 
 def gem(x, p=3, eps=1e-6):
+    """
+    Computes the generalized mean (GeM) of the input tensor along its last dimension.
+    
+    This function raises each element of the input tensor to the power p, averages the results 
+    over the last dimension using 1D average pooling, and then takes the p-th root of the averaged result.
+    A small epsilon is used to clamp the input tensor for numerical stability.
+    
+    Args:
+        x (Tensor): Input tensor on which to perform pooling.
+        p (float, optional): The exponent parameter controlling the pooling behavior. Defaults to 3.
+        eps (float, optional): Small constant for numerical stability. Defaults to 1e-6.
+    
+    Returns:
+        Tensor: The pooled tensor with the same number of dimensions as the input, except the last 
+        dimension is reduced to 1.
+    """
     return F.avg_pool1d(x.clamp(min=eps).pow(p), (x.size(-1))).pow(1.0 / p)
 
 
 class GeM(nn.Module):
     def __init__(self, p=3, eps=1e-6):
+        """
+        Initializes the GeM pooling module.
+        
+        This module sets up a learnable exponent parameter for the generalized mean pooling
+        operation and a small constant for numerical stability.
+        
+        Args:
+            p (float, optional): Initial exponent value for pooling. Default is 3.
+            eps (float, optional): Small constant to avoid division by zero. Default is 1e-6.
+        """
         super(GeM, self).__init__()
         self.p = Parameter(torch.ones(1) * p)
         self.eps = eps
 
     def forward(self, x):
+        """
+        Applies generalized mean pooling to the input tensor.
+        
+        This method computes the generalized mean of the input tensor using the module’s 
+        pooling exponent (p) and stabilization constant (eps), and returns the pooled tensor.
+        """
         return gem(x, p=self.p, eps=self.eps)
 
     def __repr__(self):
+        """
+        Return the string representation of the object.
+        
+        The representation includes the class name along with the 'p' parameter (formatted to four decimal places) and the 'eps' value.
+        """
         return (
             self.__class__.__name__
             + "("
@@ -61,6 +127,13 @@ class ScaledDotProductAttention(nn.Module):
     """Scaled Dot-Product Attention"""
 
     def __init__(self, temperature, attn_dropout=0.1):
+        """
+        Initialize the module with temperature scaling and dropout for attention.
+        
+        Parameters:
+            temperature: Scaling factor applied to attention logits.
+            attn_dropout: Dropout probability for attention weights (default is 0.1).
+        """
         super().__init__()
         self.temperature = temperature
         self.dropout = nn.Dropout(attn_dropout)
@@ -69,6 +142,28 @@ class ScaledDotProductAttention(nn.Module):
     def forward(self, q, k, v, mask=None, attn_mask=None):
 
         # print(self.gamma)
+        """
+        Computes scaled dot-product attention.
+        
+        Calculates attention scores by taking the dot product of the query and key
+        tensors (with key transposed) and scaling them by a temperature factor. An
+        optional bias (mask) and an optional attention mask can be applied to adjust
+        these scores before they are normalized with softmax and processed with dropout.
+        Finally, the function computes the weighted sum of the value tensor using the
+        normalized attention weights.
+        
+        Args:
+            q: Query tensor.
+            k: Key tensor.
+            v: Value tensor.
+            mask: Optional tensor added as a bias to the attention scores.
+            attn_mask: Optional tensor used to mask out specific positions in the
+                       attention scores.
+        
+        Returns:
+            A tuple (output, attn) where output is the result of the attention operation
+            and attn contains the normalized attention weights.
+        """
         attn = torch.matmul(q, k.transpose(2, 3)) / self.temperature
         # to_plot=attn[0,0].detach().cpu().numpy()
         # plt.imshow(to_plot)
@@ -103,6 +198,21 @@ class MultiHeadAttention(nn.Module):
     """Multi-Head Attention module"""
 
     def __init__(self, d_model, n_head, d_k, d_v, dropout=0.1):
+        """
+        Initializes the multi-head attention module.
+        
+        This constructor creates linear projections for queries, keys, and values from the input
+        features, and sets up the scaled dot-product attention mechanism with temperature scaling
+        based on the query/key dimension. It also initializes a final linear layer to combine the
+        attention outputs, along with dropout and layer normalization for improved training stability.
+        
+        Args:
+            d_model: Dimensionality of the input feature space.
+            n_head: Number of attention heads.
+            d_k: Dimensionality for the query and key projections per head.
+            d_v: Dimensionality for the value projections per head.
+            dropout: Dropout probability applied to the attention output.
+        """
         super().__init__()
 
         self.n_head = n_head
@@ -121,6 +231,25 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, q, k, v, mask=None, src_mask=None):
 
+        """
+        Applies multi-head attention to input queries, keys, and values.
+        
+        Projects inputs into multiple attention heads and computes scaled dot-product attention. If a source
+        mask is provided, it is transformed into an attention mask via an outer product. The resulting attended
+        features are concatenated, processed with dropout and a linear transformation, then combined with a
+        residual connection and normalized.
+        
+        Args:
+            q: Query tensor with shape (batch_size, query_length, feature_dim).
+            k: Key tensor with shape (batch_size, key_length, feature_dim).
+            v: Value tensor with shape (batch_size, value_length, feature_dim).
+            mask: Optional mask tensor to limit attention to specific positions.
+            src_mask: Optional binary mask used to generate an additional attention mask via outer product.
+        
+        Returns:
+            A tuple (output, attn) where output is the normalized tensor of attended queries and attn contains the
+            computed attention weights.
+        """
         d_k, d_v, n_head = self.d_k, self.d_v, self.n_head
         sz_b, len_q, len_k, len_v = q.size(0), q.size(1), k.size(1), v.size(1)
 
@@ -174,6 +303,23 @@ class ConvTransformerEncoderLayer(nn.Module):
         dropout=0.1,
         k=3,
     ):
+        """
+        Initialize a ConvTransformerEncoderLayer module.
+        
+        This module integrates multi-head self-attention, a feedforward network, convolutional filtering,
+        and pairwise feature transformations to process input sequences. When enabled, it also applies
+        triangular attention mechanisms to refine pairwise interactions. The layer is equipped with normalization
+        and dropout layers to ensure stable training.
+        
+        Args:
+            d_model: Dimensionality of the input embeddings.
+            nhead: Number of self-attention heads.
+            dim_feedforward: Size of the intermediate layer in the feedforward network.
+            pairwise_dimension: Dimensionality of the pairwise feature representation.
+            use_triangular_attention: Flag indicating whether to apply triangular attention to pairwise features.
+            dropout: Dropout probability applied across various submodules (default is 0.1).
+            k: Kernel size for the convolutional operation (default is 3).
+        """
         super(ConvTransformerEncoderLayer, self).__init__()
         # self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         self.self_attn = MultiHeadAttention(
@@ -235,6 +381,18 @@ class ConvTransformerEncoderLayer(nn.Module):
 
     def forward(self, src, pairwise_features, src_mask=None, return_aw=False):
 
+        """
+        Performs a forward pass that updates sequence and pairwise features via convolution, self-attention, and triangular operations.
+        
+        Args:
+            src: Input tensor of sequence features, modulated by src_mask.
+            pairwise_features: Tensor of pairwise features that is updated through outer product projections and triangle modules.
+            src_mask: Optional mask tensor applied to src to suppress invalid entries.
+            return_aw: If True, includes self attention weights in the returned tuple.
+        
+        Returns:
+            A tuple containing the updated sequence features and pairwise features. If return_aw is True, the tuple also includes the self attention weights.
+        """
         src = src * src_mask.float().unsqueeze(-1)
 
         res = src
@@ -285,6 +443,19 @@ class ConvTransformerEncoderLayer(nn.Module):
 class PositionalEncoding(nn.Module):
 
     def __init__(self, d_model, dropout=0.1, max_len=200):
+        """
+        Initialize the positional encoding module using sine and cosine functions.
+        
+        Precomputes positional encodings up to a specified maximum sequence length and stores
+        them as a non-trainable buffer. These encodings, generated from sine and cosine functions,
+        can be added to input embeddings to inject positional information. A dropout layer is
+        applied to the output as a form of regularization.
+        
+        Args:
+            d_model: Dimensionality of the embeddings.
+            dropout: Dropout probability applied to the positional encoding output.
+            max_len: Maximum sequence length for which positional encodings are precomputed.
+        """
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 
@@ -299,17 +470,57 @@ class PositionalEncoding(nn.Module):
         self.register_buffer("pe", pe)
 
     def forward(self, x):
+        """
+        Add positional encodings to the input tensor and apply dropout.
+        
+        This method augments the input tensor with precomputed positional encodings,
+        sliced to match the input sequence length, and then applies dropout for
+        regularization.
+        
+        Args:
+            x (Tensor): Input tensor with shape [seq_len, batch_size, embedding_dim].
+        
+        Returns:
+            Tensor: The result after adding positional encodings to x and applying dropout.
+        """
         x = x + self.pe[: x.size(0), :]
         return self.dropout(x)
 
 
 class Outer_Product_Mean(nn.Module):
     def __init__(self, in_dim=256, dim_msa=32, pairwise_dim=64):
+        """
+        Initializes an Outer_Product_Mean module.
+        
+        This module sets up two linear projection layers. The first layer projects input features from in_dim to dim_msa, 
+        preparing them for an outer product operation. The second layer maps the flattened outer product (of dimension dim_msa²) 
+        to a pairwise representation of dimension pairwise_dim.
+        
+        Args:
+            in_dim (int): Dimensionality of the input features (default: 256).
+            dim_msa (int): Reduced feature dimension for the MSA projection (default: 32).
+            pairwise_dim (int): Output dimensionality of the pairwise feature representation (default: 64).
+        """
         super(Outer_Product_Mean, self).__init__()
         self.proj_down1 = nn.Linear(in_dim, dim_msa)
         self.proj_down2 = nn.Linear(dim_msa**2, pairwise_dim)
 
     def forward(self, seq_rep, pair_rep=None):
+        """
+        Computes a pairwise feature representation from sequence features.
+        
+        This method applies an initial projection to the input sequence features, computes their outer
+        product to capture pairwise interactions, and then rearranges and projects the result into a
+        pairwise feature map. If an optional pairwise representation is provided, it is added to the
+        computed features.
+        
+        Args:
+            seq_rep: Tensor containing the sequence features.
+            pair_rep: Optional tensor representing an existing pairwise feature map.
+        
+        Returns:
+            Tensor representing the combined pairwise features.
+        """
         seq_rep = self.proj_down1(seq_rep)
         outer_product = torch.einsum("bid,bjc -> bijcd", seq_rep, seq_rep)
         outer_product = rearrange(outer_product, "b i j c d -> b i j (c d)")
@@ -324,10 +535,34 @@ class Outer_Product_Mean(nn.Module):
 class relpos(nn.Module):
 
     def __init__(self, dim=64):
+        """
+        Initialize the relative positional encoding module.
+        
+        This constructor sets up a linear transformation that projects a fixed input size of 17
+        to the specified output dimensionality.
+        
+        Args:
+            dim (int): The output feature dimension for the linear projection (default: 64).
+        """
         super(relpos, self).__init__()
         self.linear = nn.Linear(17, dim)
 
     def forward(self, src):
+        """
+        Compute relative positional embeddings for an input sequence.
+        
+        This method determines the pairwise differences between sequence positions,
+        clamps these differences to the range [-8, 8], and converts them into one-hot
+        encodings using bin values from -8 to 8. The resulting one-hot tensor is then
+        projected via a linear transformation to produce the final relative positional
+        embeddings.
+        
+        Args:
+            src (torch.Tensor): Input tensor whose second dimension determines the sequence length.
+        
+        Returns:
+            torch.Tensor: The projected relative positional embeddings.
+        """
         L = src.shape[1]
         res_id = torch.arange(L).to(src.device).unsqueeze(0)
         device = res_id.device
@@ -344,15 +579,54 @@ class relpos(nn.Module):
 
 
 def exists(val):
+    """
+    Check if the given value is not None.
+    
+    Args:
+        val: The value to check.
+    
+    Returns:
+        bool: True if val is not None, False otherwise.
+    """
     return val is not None
 
 
 def default(val, d):
+    """
+    Return candidate value if it exists, otherwise return the default.
+    
+    This function checks whether the given value meets the existence criteria
+    (using the external exists() function). If the value exists, it is returned;
+    otherwise, the default value is returned.
+    
+    Args:
+        val: The candidate value to be tested.
+        d: The default value to return if val does not exist.
+    
+    Returns:
+        The candidate value if it exists; otherwise, the default value.
+    """
     return val if exists(val) else d
 
 
 class TriangleMultiplicativeModule(nn.Module):
     def __init__(self, *, dim, hidden_dim=None, mix="ingoing"):
+        """
+        Initialize the triangle multiplicative module with gated interactions.
+        
+        This constructor sets up projection layers for left and right inputs and
+        configures gating mechanisms with identity initialization. It also applies
+        layer normalization to both the input features and the intermediate
+        representation. An einsum equation is selected based on the specified mixing
+        direction to determine how features are multiplicatively combined.
+        
+        Args:
+            dim: The dimensionality of the input features.
+            hidden_dim: Optional; the dimensionality of the hidden representation,
+                defaults to the value of dim.
+            mix: A string indicating the type of feature mixing, which must be either
+                "ingoing" or "outgoing".
+        """
         super().__init__()
         assert mix in {"ingoing", "outgoing"}, "mix must be either ingoing or outgoing"
 
@@ -381,6 +655,22 @@ class TriangleMultiplicativeModule(nn.Module):
         self.to_out = nn.Linear(hidden_dim, dim)
 
     def forward(self, x, src_mask=None):
+        """
+        Applies gated multiplicative mixing to a symmetrical feature map.
+        
+        Normalizes the input tensor and computes two projected streams that are modulated by an
+        optional spatial mask and learnable gating functions. The method then fuses the gated
+        projections via a predefined Einstein summation, applies further normalization and
+        gating, and finally projects the result to produce the transformed feature map.
+        
+        Args:
+            x (Tensor): A symmetrical feature map tensor (where the second and third dimensions are equal).
+            src_mask (Tensor, optional): A mask tensor that is expanded into a pairwise mask to modulate
+                the feature projections.
+        
+        Returns:
+            Tensor: The output tensor after gated multiplicative mixing and transformation.
+        """
         src_mask = src_mask.unsqueeze(-1).float()
         mask = torch.matmul(src_mask, src_mask.permute(0, 2, 1))
         assert x.shape[1] == x.shape[2], "feature map must be symmetrical"
@@ -415,6 +705,17 @@ class RibonanzaNet(nn.Module):
     # def __init__(self, ntoken=5, nclass=1, ninp=512, nhead=8, nlayers=9, kmers=9, dropout=0):
     def __init__(self, config):
 
+        """Initializes RibonanzaNet with transformer, embedding, and decoder modules.
+        
+        Constructs the model architecture by assembling a series of ConvTransformerEncoderLayer modules,
+        an embedding layer for token inputs, and a linear decoder for classification. It also initializes
+        modules for outer product pooling and relative positional encoding to handle pairwise features.
+        All relevant hyperparameters (e.g., ninp, nlayers, nhead, k, ntoken, nclass, dropout, pairwise_dimension,
+        and use_triangular_attention) are specified via the configuration object.
+        
+        Args:
+            config: A configuration object containing model hyperparameters.
+        """
         super(RibonanzaNet, self).__init__()
         self.config = config
         nhid = config.ninp * 4
@@ -452,6 +753,22 @@ class RibonanzaNet(nn.Module):
         self.pos_encoder = relpos(config.pairwise_dimension)
 
     def forward(self, src, src_mask=None, return_aw=False):
+        """
+        Performs a forward pass through the model.
+        
+        Encodes the input sequence, computes pairwise features using an outer product mean
+        and positional encoding, and passes the result through multiple transformer encoder
+        layers and a decoder. If requested, collects and returns attention weights from each
+        encoder layer.
+        
+        Args:
+            src: Input tensor of shape (batch_size, sequence_length).
+            src_mask: Optional mask tensor for the encoder layers.
+            return_aw: If True, returns a tuple containing the output and a list of attention weights.
+        
+        Returns:
+            If return_aw is True, a tuple (output, attention_weights); otherwise, the output tensor.
+        """
         B, L = src.shape
         src = src
         src = self.encoder(src).reshape(B, L, -1)
@@ -497,6 +814,21 @@ class RibonanzaNet(nn.Module):
 
 class TriangleAttention(nn.Module):
     def __init__(self, in_dim=128, dim=32, n_heads=4, wise="row"):
+        """
+        Initializes the TriangleAttention module.
+        
+        This module prepares the internal layers for computing triangular attention using 
+        multiple heads and a gating mechanism. It applies layer normalization, linear 
+        projections to compute query, key, and value tensors, and combines head outputs 
+        through a final linear transformation. The 'wise' parameter controls whether 
+        attention is computed row- or column-wise.
+        
+        Args:
+            in_dim (int, optional): Dimension of the input features. Default is 128.
+            dim (int, optional): Dimension for QKV projections per head. Default is 32.
+            n_heads (int, optional): Number of attention heads. Default is 4.
+            wise (str, optional): Attention mode ('row' or 'column'). Default is "row".
+        """
         super(TriangleAttention, self).__init__()
         self.n_heads = n_heads
         self.wise = wise
@@ -510,16 +842,24 @@ class TriangleAttention(nn.Module):
 
     def forward(self, z, src_mask):
         """
-        how to do masking
-        for row tri attention:
-        attention matrix is brijh, where b is batch, r is row, h is head
-        so mask should be b()ijh, i.e. take self attention mask and unsqueeze(1,-1)
-        add negative inf to matrix before softmax
-
-        for col tri attention
-        attention matrix is bijlh, so take self attention mask and unsqueeze(3,-1)
-
-        take src_mask and spawn pairwise mask, and unsqueeze accordingly
+        Computes triangular attention with row or column-wise masking.
+        
+        Transforms the input source mask into a pairwise mask for suppressing invalid positions
+        and applies multi-head scaled dot-product attention on normalized features. The method
+        projects the input into query, key, and value tensors and, based on the attention mode
+        specified by the instance attribute 'wise' ('row' or 'col'), reshapes the tensors accordingly.
+        It then computes scaled attention scores with an added bias, masks the scores, and applies
+        softmax normalization. Finally, a gating mechanism and linear transformation yield the output.
+        
+        Args:
+            z: Tensor containing input feature representations.
+            src_mask: Binary tensor mask indicating valid positions for computing attention.
+        
+        Returns:
+            Tensor with the computed triangular attention applied.
+        
+        Raises:
+            ValueError: If the 'wise' attribute is not set to either 'row' or 'col'.
         """
 
         # spwan pair mask
