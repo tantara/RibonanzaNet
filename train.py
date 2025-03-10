@@ -74,21 +74,25 @@ def train(args):
     # get necessary data as lists and numpy arrays
     seq_length = 206
 
-    # filter out a sequence if min SN is smaller than 1
-    SN = data["signal_to_noise"].to_numpy().astype("float32").reshape(-1, 2)
-    SN = SN.min(-1)
-    SN = np.repeat(SN, 2)
+    # filter out a sequence if min signal_to_noise is smaller than 1
+    signal_to_noise = (
+        data["signal_to_noise"].to_numpy().astype("float32").reshape(-1, 2)
+    )
+    signal_to_noise = signal_to_noise.min(-1)
+    signal_to_noise = np.repeat(signal_to_noise, 2)
     print("before filtering data shape is:", data.shape)
-    dirty_data = data.filter((SN <= 1))
-    data = data.filter(SN > 1)
+    dirty_data = data.filter((signal_to_noise <= 1))
+    data = data.filter(signal_to_noise > 1)
     print("after filtering data shape is:", data.shape)
     print("dirty data shape is:", dirty_data.shape)
 
-    # get sequences where one of 2A3/DMS has SN>1
-    dirty_SN = dirty_data["signal_to_noise"].to_numpy().astype("float32").reshape(-1, 2)
-    dirty_SN = dirty_SN.max(-1)
-    dirty_SN = np.repeat(dirty_SN, 2)
-    dirty_data = dirty_data.filter(dirty_SN > 1)
+    # get sequences where one of 2A3/DMS has signal_to_noise>1
+    dirty_signal_to_noise = (
+        dirty_data["signal_to_noise"].to_numpy().astype("float32").reshape(-1, 2)
+    )
+    dirty_signal_to_noise = dirty_signal_to_noise.max(-1)
+    dirty_signal_to_noise = np.repeat(dirty_signal_to_noise, 2)
+    dirty_data = dirty_data.filter(dirty_signal_to_noise > 1)
     print("after filtering dirty_data shape is:", dirty_data.shape)
 
     label_names = [
@@ -118,7 +122,9 @@ def train(args):
         .reshape(-1, 2, 206)
         .transpose(0, 2, 1)
     )
-    SN = data["signal_to_noise"].to_numpy().astype("float32").reshape(-1, 2)
+    signal_to_noise = (
+        data["signal_to_noise"].to_numpy().astype("float32").reshape(-1, 2)
+    )
     dataset_name = data["dataset_name"].to_list()
     dataset_name = [
         dataset_name[i * 2].replace("2A3", "NULL").replace("DMS", "NULL")
@@ -130,7 +136,7 @@ def train(args):
         "sequence_ids": sequence_ids,
         "labels": labels,
         "errors": errors,
-        "SN": SN,
+        "signal_to_noise": signal_to_noise,
     }
 
     # StratifiedKFold on dataset
@@ -152,7 +158,7 @@ def train(args):
         print(f"number of sequences in train {len(train_indices)} after subsampling")
 
     if config.use_dirty_data:
-        print("using sequences where one of 2A3/DMS has SN>1")
+        print("using sequences where one of 2A3/DMS has signal_to_noise>1")
         data_dict["sequences"] += dirty_data.unique(
             subset=["sequence_id"], maintain_order=True
         )["sequence"].to_list()
@@ -179,9 +185,9 @@ def train(args):
                 .transpose(0, 2, 1),
             ]
         )
-        data_dict["SN"] = np.concatenate(
+        data_dict["signal_to_noise"] = np.concatenate(
             [
-                data_dict["SN"],
+                data_dict["signal_to_noise"],
                 dirty_data["signal_to_noise"]
                 .to_numpy()
                 .astype("float32")
@@ -288,7 +294,7 @@ def train(args):
             src = batch["sequence"]  # .cuda()
             masks = batch["masks"].bool()  # .cuda()
             labels = batch["labels"]  # .cuda()
-            SN = batch["SN"]
+            signal_to_noise = batch["signal_to_noise"]
 
             bs = len(labels)
             # batch_attention_mask=batch['attention_mask'].unsqueeze(1)[:,:,:src.shape[-1],:src.shape[-1]]
@@ -296,12 +302,17 @@ def train(args):
             loss_masks = batch["loss_masks"]  # .cuda()
             errors = batch["errors"]  # .cuda()#.un
             # SSH FS test
-            SN = SN.reshape(SN.shape[0], 1, SN.shape[1]) >= 1
-            loss_masks = loss_masks * SN
+            signal_to_noise = (
+                signal_to_noise.reshape(
+                    signal_to_noise.shape[0], 1, signal_to_noise.shape[1]
+                )
+                >= 1
+            )
+            loss_masks = loss_masks * signal_to_noise
 
             # batch_attention_mask=batch['attention_mask']
             # batch_attention_mask=torch.stack([batch_attention_mask[:,:src.shape[-1],:src.shape[-1]],bpp],1)
-            SN = batch["SN"]
+            signal_to_noise = batch["signal_to_noise"]
             with accelerator.autocast():
                 output = model(src, masks)
                 loss = criterion(output, labels)  # *loss_weight BxLxC
