@@ -27,5 +27,6 @@ use_dirty_data: true # turn off for data scaling and data dropout experiments
 # Other configurations
 fold: 0
 nfolds: 6
-input_dir: "../../input/"
+# input_dir: "../../input/"
+input_dir: "stanford-ribonanza-rna-folding"
 gpu_id: "0"
