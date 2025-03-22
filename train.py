@@ -31,7 +31,7 @@ def train(args):
     # load config
     """
     Trains a neural network model for RNA sequence data.
-    
+
     This function sets up and executes the training workflow for predicting RNA reactivity.
     It loads configuration parameters from a YAML file specified in the input arguments,
     initializes the accelerator and experiment tracking via Weights & Biases, and creates
@@ -42,7 +42,7 @@ def train(args):
     gradient accumulation, trains the model using a cosine annealing learning rate schedule,
     and performs validation at each epoch. Training metrics and model states are saved when
     improvements are observed, and final run statistics are logged.
-    
+
     Args:
         args: An object with a `config_path` attribute pointing to the YAML configuration file.
     """
@@ -120,8 +120,8 @@ def train(args):
     dirty_data = dirty_data.filter(dirty_signal_to_noise > 1)
     print("after filtering dirty_data shape is:", dirty_data.shape)
 
-    label_names = [f"reactivity_{i:04d}" for i in range(seq_length)]
-    error_label_names = [f"reactivity_error_{i:04d}" for i in range(seq_length)]
+    label_names = [f"reactivity_{i + 1:04d}" for i in range(seq_length)]
+    error_label_names = [f"reactivity_error_{i + 1:04d}" for i in range(seq_length)]
 
     sequences = data.unique(subset=["sequence_id"], maintain_order=True)[
         "sequence"
