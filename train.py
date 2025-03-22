@@ -29,6 +29,23 @@ from tqdm import tqdm
 
 def train(args):
     # load config
+    """
+    Trains a neural network model for RNA sequence data.
+    
+    This function sets up and executes the training workflow for predicting RNA reactivity.
+    It loads configuration parameters from a YAML file specified in the input arguments,
+    initializes the accelerator and experiment tracking via Weights & Biases, and creates
+    necessary directories for logs, models, and out-of-fold predictions. The function
+    loads and preprocesses the RNA sequence data, including duplicate removal and filtering
+    based on signal-to-noise ratios, and splits the data using stratified K-fold cross-validation.
+    It then prepares training and validation datasets with optional data augmentation and
+    gradient accumulation, trains the model using a cosine annealing learning rate schedule,
+    and performs validation at each epoch. Training metrics and model states are saved when
+    improvements are observed, and final run statistics are logged.
+    
+    Args:
+        args: An object with a `config_path` attribute pointing to the YAML configuration file.
+    """
     config = load_config_from_yaml(args.config_path)
 
     # init accelerator & wandb

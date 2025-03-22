@@ -40,10 +40,9 @@ class Config:
 
     def __init__(self, **entries):
         """
-        Initializes a configuration object with provided key-value settings.
-
-        Updates the instance's attributes with the given keyword arguments and retains
-        the original dictionary of entries in the 'entries' attribute.
+        Initializes a configuration instance with provided settings.
+        
+        Sets instance attributes from the given keyword arguments.
         """
         self.__dict__.update(entries)
 
@@ -82,19 +81,17 @@ def dataset_dropout(dataset_name, train_indices, dataset2drop):
 
     # dataset_name=pl.Series(dataset_name)
     """
-    Filters out training indices whose corresponding dataset names start with a specified prefix.
-
-    This function converts the provided dataset names into a series and identifies the indices
-    for which the names do not start with the given prefix. It then intersects these indices with
-    the given training indices, printing counts before and after filtering, and returns an array
-    of the filtered training indices.
-
+    Filters training indices by excluding entries from datasets with names beginning with a given prefix.
+    
+    This function removes from the provided training indices any example whose corresponding dataset name
+    starts with the specified prefix. It prints the count of training examples before and after filtering
+    and returns the remaining indices as a NumPy array.
+    
     Args:
-        dataset_name: An array-like sequence of strings representing dataset names.
-        train_indices: An array-like collection of integer indices for training examples.
-        dataset2drop: A string prefix. Training examples with dataset names starting with this prefix
-            will be dropped.
-
+        dataset_name: Sequence of strings representing dataset names.
+        train_indices: Array-like collection of indices for training examples.
+        dataset2drop: Prefix string; examples with dataset names starting with this value are dropped.
+    
     Returns:
         A NumPy array of training indices after filtering.
     """
@@ -128,26 +125,27 @@ def dataset_dropout(dataset_name, train_indices, dataset2drop):
 
 def get_pl_train(pl_train, seq_length=457):
     """
-    Extracts training data from a DataFrame by filtering unique sequences and formatting reactivity labels.
-
-    The function removes duplicate records based on sequence identifiers and experiment types,
-    then extracts unique sequences and their identifiers. Reactivity measurements are collected,
-    reshaped into a two-channel array per sequence, and converted to float16. A corresponding
-    error array is initialized to zeros, and signal-to-noise ratios are set uniformly to 10.
-
+    Extracts unique training sequences and reformats associated reactivity data.
+    
+    This function filters a training dataset to remove duplicate records based on sequence
+    identifiers and experiment types. It then extracts unique sequences along with their IDs,
+    reshapes reactivity measurements (sourced from columns named as "reactivity_XXXX") into a
+    two-channel NumPy array of shape (num_sequences, seq_length, 2), and converts it to float16.
+    Corresponding error arrays are initialized to zeros and signal-to-noise ratios are uniformly
+    set to 10.
+    
     Args:
-        pl_train: A DataFrame containing training records with columns for sequence identifiers,
-                  experiment types, sequences, reactivity measurements (prefixed with "reactivity_"),
-                  and signal-to-noise ratios.
-        seq_length: The expected sequence length used to generate reactivity label column names (default is 457).
-
+        pl_train: A DataFrame containing training records with columns for sequence IDs, sequences,
+            experiment types, reactivity measurements, and a "signal_to_noise" field.
+        seq_length: The expected length of sequences used to generate reactivity measurement column names (default is 457).
+    
     Returns:
-        A dictionary with the following keys:
-            "sequences": List of unique sequences.
+        dict: A dictionary with the following keys:
+            "sequences": List of unique sequence strings.
             "sequence_ids": List of unique sequence identifiers.
-            "labels": Numpy array of reactivity labels reshaped to (num_sequences, seq_length, 2) as float16.
-            "errors": Numpy array of zeros with the same shape as "labels" as float16.
-            "signal_to_noise": Numpy array of signal-to-noise ratios with shape (-1, 2) as float16.
+            "labels": A float16 NumPy array of reactivity measurements with shape (num_sequences, seq_length, 2).
+            "errors": A float16 NumPy array of zeros matching the shape of "labels".
+            "signal_to_noise": A float16 NumPy array of shape (num_sequences, 2) with all values set to 10.
     """
     print(f"before filtering pl_train has shape {pl_train.shape}")
     pl_train = pl_train.unique(subset=["sequence_id", "experiment_type"]).sort(
@@ -213,16 +211,11 @@ def load_config_from_yaml(file_path):
 
 
 def write_config_to_yaml(config, file_path):
-    """
-    Writes a configuration object to a YAML file.
-
-    Opens the specified file in write mode and serializes the provided configuration
-    using YAML's safe dump method. Any existing content at the file path is overwritten.
-
+    """Writes a configuration object to a YAML file.
+    Opens the specified file in write mode and serializes the provided configuration using YAML's safe_dump method, overwriting any existing content.
     Args:
         config: Configuration data to be serialized (typically a dict or Config instance).
-        file_path: The target file path for the YAML output.
-    """
+        file_path: The target file path for the YAML output."""
     with open(file_path, "w") as file:
         yaml.safe_dump(config, file)
 
@@ -285,10 +278,9 @@ class CSVLogger:
     def _write_header(self):
         """
         Write the CSV header row to the log file.
-
-        Opens the file in append mode and writes a comma-separated line based on the instance's
-        columns, ensuring the trailing comma is removed and a newline is appended. Returns the
-        logger instance.
+        
+        Builds a comma-separated header string from the logger's columns and appends it to the file.
+        Returns the logger instance for method chaining.
         """
         with open(self.file, "a") as f:
             string = ""
