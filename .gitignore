@@ -1,6 +1,10 @@
 __pycache__
-logs
-oofs
 stanford-ribonanza-rna-folding
 stanford-ribonanza-rna-folding.zip
 wandb
+experiments
+models
+oofs
+logs
+.ipynb_checkpoints
+run_stats.json

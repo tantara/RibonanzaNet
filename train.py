@@ -29,19 +29,49 @@ from tqdm import tqdm
 
 def train(args):
     # load config
+    """
+    Trains a neural network model for RNA sequence data.
+    
+    This function sets up and executes the training workflow for predicting RNA reactivity.
+    It loads configuration parameters from a YAML file specified in the input arguments,
+    initializes the accelerator and experiment tracking via Weights & Biases, and creates
+    necessary directories for logs, models, and out-of-fold predictions. The function
+    loads and preprocesses the RNA sequence data, including duplicate removal and filtering
+    based on signal-to-noise ratios, and splits the data using stratified K-fold cross-validation.
+    It then prepares training and validation datasets with optional data augmentation and
+    gradient accumulation, trains the model using a cosine annealing learning rate schedule,
+    and performs validation at each epoch. Training metrics and model states are saved when
+    improvements are observed, and final run statistics are logged.
+    
+    Args:
+        args: An object with a `config_path` attribute pointing to the YAML configuration file.
+    """
     config = load_config_from_yaml(args.config_path)
 
     # init accelerator & wandb
     accelerator = Accelerator(mixed_precision="fp16")
     if accelerator.is_local_main_process:
-        wandb.init(
+        run = wandb.init(
             project="ribonanza",
             config=config,
         )
+        wandb_run_id = run.id
+    else:
+        wandb_run_id = "local"
 
     # init logger
+    base_dir = f"experiments/{wandb_run_id}"
+    log_dir = f"{base_dir}/logs"
+    model_dir = f"{base_dir}/models"
+    oofs_dir = f"{base_dir}/oofs"
+
+    os.system(f"mkdir -p {log_dir}")
+    os.system(f"mkdir -p {model_dir}")
+    os.system(f"mkdir -p {oofs_dir}")
+
     logger = CSVLogger(
-        ["epoch", "train_loss", "val_loss"], f"logs/fold{config.fold}.csv"
+        ["epoch", "train_loss", "val_loss"],
+        f"{log_dir}/fold{config.fold}.csv",
     )
 
     # init seed
@@ -52,11 +82,6 @@ def train(args):
     # os.environ["POLARS_MAX_THREADS"] = "1"
     os.environ["CUDA_VISIBLE_DEVICES"] = str(config.gpu_id)
     os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
-
-    # create directories
-    os.system("mkdir logs")
-    os.system("mkdir models")
-    os.system("mkdir oofs")
 
     # load data
     data = pl.read_csv(f"{config.input_dir}/train_data.csv")
@@ -70,33 +95,33 @@ def train(args):
     print("after dropping duplicates data shape is:", data.shape)
     # data=data.sort(["signal_to_noise"],descending=True).unique(subset=["sequence_id", "experiment_type"]).sort(["sequence_id", "experiment_type"])
 
-    n_sequences_total = len(data) // 2
+    # n_sequences_total = len(data) // 2
     # get necessary data as lists and numpy arrays
-    seq_length = 206
+    seq_length = config.seq_length
 
-    # filter out a sequence if min SN is smaller than 1
-    SN = data["signal_to_noise"].to_numpy().astype("float32").reshape(-1, 2)
-    SN = SN.min(-1)
-    SN = np.repeat(SN, 2)
+    # filter out a sequence if min signal_to_noise is smaller than 1
+    signal_to_noise = (
+        data["signal_to_noise"].to_numpy().astype("float32").reshape(-1, 2)
+    )
+    signal_to_noise = signal_to_noise.min(-1)
+    signal_to_noise = np.repeat(signal_to_noise, 2)
     print("before filtering data shape is:", data.shape)
-    dirty_data = data.filter((SN <= 1))
-    data = data.filter(SN > 1)
+    dirty_data = data.filter((signal_to_noise <= 1))
+    data = data.filter(signal_to_noise > 1)
     print("after filtering data shape is:", data.shape)
     print("dirty data shape is:", dirty_data.shape)
 
-    # get sequences where one of 2A3/DMS has SN>1
-    dirty_SN = dirty_data["signal_to_noise"].to_numpy().astype("float32").reshape(-1, 2)
-    dirty_SN = dirty_SN.max(-1)
-    dirty_SN = np.repeat(dirty_SN, 2)
-    dirty_data = dirty_data.filter(dirty_SN > 1)
+    # get sequences where one of 2A3/DMS has signal_to_noise>1
+    dirty_signal_to_noise = (
+        dirty_data["signal_to_noise"].to_numpy().astype("float32").reshape(-1, 2)
+    )
+    dirty_signal_to_noise = dirty_signal_to_noise.max(-1)
+    dirty_signal_to_noise = np.repeat(dirty_signal_to_noise, 2)
+    dirty_data = dirty_data.filter(dirty_signal_to_noise > 1)
     print("after filtering dirty_data shape is:", dirty_data.shape)
 
-    label_names = [
-        "reactivity_{:04d}".format(number + 1) for number in range(seq_length)
-    ]
-    error_label_names = [
-        "reactivity_error_{:04d}".format(number + 1) for number in range(seq_length)
-    ]
+    label_names = [f"reactivity_{i:04d}" for i in range(seq_length)]
+    error_label_names = [f"reactivity_error_{i:04d}" for i in range(seq_length)]
 
     sequences = data.unique(subset=["sequence_id"], maintain_order=True)[
         "sequence"
@@ -108,17 +133,19 @@ def train(args):
         data[label_names]
         .to_numpy()
         .astype("float32")
-        .reshape(-1, 2, 206)
+        .reshape(-1, 2, seq_length)
         .transpose(0, 2, 1)
     )
     errors = (
         data[error_label_names]
         .to_numpy()
         .astype("float32")
-        .reshape(-1, 2, 206)
+        .reshape(-1, 2, seq_length)
         .transpose(0, 2, 1)
     )
-    SN = data["signal_to_noise"].to_numpy().astype("float32").reshape(-1, 2)
+    signal_to_noise = (
+        data["signal_to_noise"].to_numpy().astype("float32").reshape(-1, 2)
+    )
     dataset_name = data["dataset_name"].to_list()
     dataset_name = [
         dataset_name[i * 2].replace("2A3", "NULL").replace("DMS", "NULL")
@@ -130,7 +157,7 @@ def train(args):
         "sequence_ids": sequence_ids,
         "labels": labels,
         "errors": errors,
-        "SN": SN,
+        "signal_to_noise": signal_to_noise,
     }
 
     # StratifiedKFold on dataset
@@ -152,7 +179,7 @@ def train(args):
         print(f"number of sequences in train {len(train_indices)} after subsampling")
 
     if config.use_dirty_data:
-        print("using sequences where one of 2A3/DMS has SN>1")
+        print("using sequences where one of 2A3/DMS has signal_to_noise>1")
         data_dict["sequences"] += dirty_data.unique(
             subset=["sequence_id"], maintain_order=True
         )["sequence"].to_list()
@@ -165,7 +192,7 @@ def train(args):
                 dirty_data[label_names]
                 .to_numpy()
                 .astype("float32")
-                .reshape(-1, 2, 206)
+                .reshape(-1, 2, seq_length)
                 .transpose(0, 2, 1),
             ]
         )
@@ -175,13 +202,13 @@ def train(args):
                 dirty_data[error_label_names]
                 .to_numpy()
                 .astype("float32")
-                .reshape(-1, 2, 206)
+                .reshape(-1, 2, seq_length)
                 .transpose(0, 2, 1),
             ]
         )
-        data_dict["SN"] = np.concatenate(
+        data_dict["signal_to_noise"] = np.concatenate(
             [
-                data_dict["SN"],
+                data_dict["signal_to_noise"],
                 dirty_data["signal_to_noise"]
                 .to_numpy()
                 .astype("float32")
@@ -215,7 +242,7 @@ def train(args):
     val_datasets_names = data[np.concatenate([val_indices * 2])][
         "dataset_name"
     ].to_list()
-    with open("oofs/val_dataset_names.p", "wb+") as f:
+    with open(f"{oofs_dir}/val_dataset_names.p", "wb+") as f:
         pickle.dump(val_datasets_names, f)
 
     del data
@@ -225,7 +252,6 @@ def train(args):
     print(f"val shape: {val_indices.shape}")
 
     val_dataset_name = [dataset_name[i] for i in val_indices]
-
     # pl_train=pl.read_parquet()
 
     train_dataset = RNADataset(
@@ -239,8 +265,7 @@ def train(args):
         num_workers=min(config.batch_size, 16),
     )
 
-    sample = train_dataset[0]
-
+    # sample = train_dataset[0]
     val_dataset = RNADataset(val_indices, data_dict, train=False, k=config.k)
     val_loader = DataLoader(
         val_dataset,
@@ -288,7 +313,7 @@ def train(args):
             src = batch["sequence"]  # .cuda()
             masks = batch["masks"].bool()  # .cuda()
             labels = batch["labels"]  # .cuda()
-            SN = batch["SN"]
+            signal_to_noise = batch["signal_to_noise"]
 
             bs = len(labels)
             # batch_attention_mask=batch['attention_mask'].unsqueeze(1)[:,:,:src.shape[-1],:src.shape[-1]]
@@ -296,12 +321,17 @@ def train(args):
             loss_masks = batch["loss_masks"]  # .cuda()
             errors = batch["errors"]  # .cuda()#.un
             # SSH FS test
-            SN = SN.reshape(SN.shape[0], 1, SN.shape[1]) >= 1
-            loss_masks = loss_masks * SN
+            signal_to_noise = (
+                signal_to_noise.reshape(
+                    signal_to_noise.shape[0], 1, signal_to_noise.shape[1]
+                )
+                >= 1
+            )
+            loss_masks = loss_masks * signal_to_noise
 
             # batch_attention_mask=batch['attention_mask']
             # batch_attention_mask=torch.stack([batch_attention_mask[:,:src.shape[-1],:src.shape[-1]],bpp],1)
-            SN = batch["SN"]
+            signal_to_noise = batch["signal_to_noise"]
             with accelerator.autocast():
                 output = model(src, masks)
                 loss = criterion(output, labels)  # *loss_weight BxLxC
@@ -338,11 +368,11 @@ def train(args):
         if epoch == cos_epoch:
             torch.save(
                 accelerator.unwrap_model(model).state_dict(),
-                f"models/model{config.fold}_pl_only.pt",
+                f"{model_dir}/model{config.fold}_pl_only.pt",
             )
         torch.save(
             accelerator.unwrap_model(optimizer).state_dict(),
-            f"models/optimizer{config.fold}.pt",
+            f"{model_dir}/optimizer{config.fold}.pt",
         )
 
         # validation loop
@@ -428,7 +458,7 @@ def train(args):
                 best_val_loss = val_loss
                 torch.save(
                     accelerator.unwrap_model(model).state_dict(),
-                    f"models/model{config.fold}.pt",
+                    f"{model_dir}/model{config.fold}.pt",
                 )
                 # accelerator.save_model(model, f"models/model{config.fold}.pt")
                 data_dict = {
@@ -438,7 +468,7 @@ def train(args):
                 }
 
                 # Save to pickle file
-                with open(f"oofs/{config.fold}.pkl", "wb+") as file:
+                with open(f"{oofs_dir}/{config.fold}.pkl", "wb+") as file:
                     pickle.dump(data_dict, file)
 
         if accelerator.is_local_main_process:
@@ -453,13 +483,13 @@ def train(args):
     if accelerator.is_local_main_process:
         torch.save(
             accelerator.unwrap_model(model).state_dict(),
-            f"models/model{config.fold}_lastepoch.pt",
+            f"{model_dir}/model{config.fold}_lastepoch.pt",
         )
 
         end_time = time.time()
         elapsed_time = end_time - start_time
 
-        with open("run_stats.json", "w") as file:
+        with open(f"{log_dir}/run_stats.json", "w") as file:
             json.dump({"total_execution_time": elapsed_time}, file, indent=4)
 
     if accelerator.is_local_main_process:
