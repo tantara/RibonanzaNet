@@ -8,3 +8,4 @@ oofs
 logs
 .ipynb_checkpoints
 run_stats.json
+test_*.ipynb
